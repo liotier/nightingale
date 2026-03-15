@@ -21,8 +21,17 @@ case "$OS" in
       *) echo "Invalid choice"; exit 1 ;;
     esac
     if [ "$TARGET" = "aarch64-unknown-linux-gnu" ] && [ "$ARCH" != "aarch64" ]; then
-      echo "==> Cross-compiling for aarch64 (ensure gcc-aarch64-linux-gnu is installed)"
-      export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+      if ! command -v cross &>/dev/null; then
+        echo ""
+        echo "Error: 'cross' is required for aarch64 cross-compilation."
+        echo ""
+        echo "  cargo install cross"
+        echo ""
+        echo "Docker must be running."
+        exit 1
+      fi
+      USE_CROSS=true
+      echo "==> Cross-compiling for aarch64 (using cross)"
     fi
     ;;
   Darwin)
@@ -50,7 +59,11 @@ echo "==> Building release binary..."
 if [ -f .env ]; then
   set -a; source .env; set +a
 fi
-cargo build --release --target "$TARGET"
+if [ "${USE_CROSS:-}" = "true" ]; then
+  cross build --release --target "$TARGET"
+else
+  cargo build --release --target "$TARGET"
+fi
 
 BINARY="target/$TARGET/release/nightingale"
 ARCHIVE="nightingale-$TARGET.tar.gz"
