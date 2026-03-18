@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex, mpsc};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -109,53 +109,82 @@ pub fn available_devices() -> Vec<String> {
     let Some(devices) = host.input_devices().ok() else {
         return vec![];
     };
-    devices.map(|d| device_display_name(&d)).collect()
+    let mut seen = HashSet::new();
+    devices
+        .filter(|d| d.default_input_config().is_ok())
+        .map(|d| device_display_name(&d))
+        .filter(|name| seen.insert(name.clone()))
+        .collect()
 }
 
-fn select_device(host: &cpal::Host, preferred: Option<&str>) -> Option<cpal::Device> {
-    if let Some(pref_name) = preferred {
-        let devices = host.input_devices().ok()?;
-        for dev in devices {
-            if device_display_name(&dev) == pref_name {
-                if let Ok(cfg) = dev.default_input_config() {
-                    info!("Using preferred mic '{pref_name}' ({}Hz)", cfg.sample_rate());
-                    return Some(dev);
-                }
-            }
-        }
-        warn!("Preferred mic '{pref_name}' not found, auto-selecting");
-    }
+const VIRTUAL_DEVICE_PATTERNS: &[&str] = &[
+    "JACK",
+    "PulseAudio",
+    "PipeWire",
+    "Default ALSA",
+    "Discard all samples",
+    "Open Sound System",
+];
 
-    let devices: Vec<cpal::Device> = host.input_devices().ok()?.collect();
-    if devices.is_empty() {
-        return None;
-    }
+fn is_virtual_device(name: &str) -> bool {
+    VIRTUAL_DEVICE_PATTERNS.iter().any(|pat| name.contains(pat))
+}
 
-    let mut best: Option<(cpal::Device, u32)> = None;
-    for dev in devices {
+fn rank_devices(host: &cpal::Host, preferred: Option<&str>, fallback: bool) -> Vec<cpal::Device> {
+    let Some(all_devices) = host.input_devices().ok() else {
+        return vec![];
+    };
+
+    let mut seen = HashSet::new();
+    let mut preferred_dev = None;
+    let mut hardware: Vec<(cpal::Device, u32)> = Vec::new();
+    let mut virtual_devs: Vec<(cpal::Device, u32)> = Vec::new();
+
+    for dev in all_devices {
+        let name = device_display_name(&dev);
         let Ok(cfg) = dev.default_input_config() else {
             continue;
         };
+        if !seen.insert(name.clone()) {
+            continue;
+        }
         let sr = cfg.sample_rate();
-        let name = device_display_name(&dev);
         info!("  Available mic: '{name}' ({sr}Hz)");
 
-        let dominated = match &best {
-            None => false,
-            Some((_, best_sr)) => sr <= *best_sr,
-        };
-        if !dominated {
-            best = Some((dev, sr));
+        if preferred.is_some_and(|p| p == name) && preferred_dev.is_none() {
+            preferred_dev = Some(dev);
+        } else if is_virtual_device(&name) {
+            virtual_devs.push((dev, sr));
+        } else {
+            hardware.push((dev, sr));
         }
     }
 
-    best.map(|(dev, _)| dev)
+    let mut result = Vec::new();
+    if let Some(pref) = preferred_dev {
+        result.push(pref);
+        if !fallback {
+            return result;
+        }
+    } else if preferred.is_some() {
+        if !fallback {
+            return result;
+        }
+        warn!("Preferred mic '{}' not found, auto-selecting", preferred.unwrap());
+    }
+
+    hardware.sort_by(|a, b| b.1.cmp(&a.1));
+    virtual_devs.sort_by(|a, b| b.1.cmp(&a.1));
+    result.extend(hardware.into_iter().map(|(d, _)| d));
+    result.extend(virtual_devs.into_iter().map(|(d, _)| d));
+
+    result
 }
 
-pub fn start_microphone(preferred: Option<&str>) -> MicrophoneCapture {
+pub fn start_microphone(preferred: Option<&str>, fallback: bool) -> MicrophoneCapture {
     let shutdown = Arc::new(AtomicBool::new(false));
     let (shared, stream, name, error_flag, counter, pitch_thread) =
-        try_build_stream(preferred, Arc::clone(&shutdown));
+        try_build_stream(preferred, fallback, Arc::clone(&shutdown));
 
     let shared = shared.unwrap_or_else(|| {
         warn!("No microphone found or permission denied; scoring disabled");
@@ -178,6 +207,7 @@ pub fn start_microphone(preferred: Option<&str>) -> MicrophoneCapture {
 
 fn try_build_stream(
     preferred: Option<&str>,
+    fallback: bool,
     shutdown: Arc<AtomicBool>,
 ) -> (
     Option<Arc<Mutex<MicPitchData>>>,
@@ -190,129 +220,143 @@ fn try_build_stream(
     let error_flag = Arc::new(AtomicBool::new(false));
     let sample_counter = Arc::new(AtomicU64::new(0));
 
-    let ret_err = Arc::clone(&error_flag);
-    let ret_ctr = Arc::clone(&sample_counter);
-
     let host = cpal::default_host();
-    let device = match select_device(&host, preferred) {
-        Some(d) => d,
-        None => return (None, None, "(no mic)".into(), ret_err, ret_ctr, None),
-    };
-    let name = device_display_name(&device);
-    info!("Microphone: {name}");
+    let candidates = rank_devices(&host, preferred, fallback);
 
-    let default_cfg = match device.default_input_config() {
-        Ok(c) => c,
-        Err(e) => {
-            warn!("Cannot get default mic config: {e}");
-            return (None, None, name, ret_err, ret_ctr, None);
-        }
-    };
-
-    let sample_rate: u32 = default_cfg.sample_rate();
-    let channels: u16 = default_cfg.channels();
-    let sample_format = default_cfg.sample_format();
-    info!("Mic config: {sample_rate}Hz, {channels}ch, format={sample_format:?}");
-
-    let config = cpal::StreamConfig {
-        channels,
-        sample_rate,
-        buffer_size: cpal::BufferSize::Default,
-    };
-
-    let shared = Arc::new(Mutex::new(MicPitchData::new(sample_rate)));
-    let shared_cb = Arc::clone(&shared);
-    let shared_detect = Arc::clone(&shared);
-
-    let counter_cb = Arc::clone(&sample_counter);
-
-    let push_samples: Arc<dyn Fn(&[f32]) + Send + Sync> = Arc::new(move |data: &[f32]| {
-        if let Ok(mut lock) = shared_cb.try_lock() {
-            let ch = channels as usize;
-            for chunk in data.chunks(ch) {
-                let mono = chunk.iter().sum::<f32>() / ch as f32;
-                lock.samples.push_back(mono);
-            }
-            while lock.samples.len() > PITCH_WINDOW * 2 {
-                lock.samples.pop_front();
-            }
-        }
-        counter_cb.fetch_add(data.len() as u64, Ordering::Relaxed);
-    });
-
-    let err_flag_cb = Arc::clone(&error_flag);
-    let make_err_cb = move || {
-        let flag = Arc::clone(&err_flag_cb);
-        move |err: cpal::StreamError| {
-            error!("Microphone stream error: {err}");
-            flag.store(true, Ordering::Relaxed);
-        }
-    };
-
-    use cpal::SampleFormat;
-    let stream = match sample_format {
-        SampleFormat::F32 => {
-            let push = push_samples.clone();
-            device.build_input_stream(
-                &config,
-                move |data: &[f32], _: &cpal::InputCallbackInfo| push(data),
-                make_err_cb(),
-                None,
-            )
-        }
-        SampleFormat::I16 => {
-            let push = push_samples.clone();
-            let mut float_buf: Vec<f32> = Vec::new();
-            device.build_input_stream(
-                &config,
-                move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                    float_buf.clear();
-                    float_buf.extend(data.iter().map(|&s| s as f32 / i16::MAX as f32));
-                    push(&float_buf);
-                },
-                make_err_cb(),
-                None,
-            )
-        }
-        SampleFormat::I32 => {
-            let push = push_samples.clone();
-            let mut float_buf: Vec<f32> = Vec::new();
-            device.build_input_stream(
-                &config,
-                move |data: &[i32], _: &cpal::InputCallbackInfo| {
-                    float_buf.clear();
-                    float_buf.extend(data.iter().map(|&s| s as f32 / i32::MAX as f32));
-                    push(&float_buf);
-                },
-                make_err_cb(),
-                None,
-            )
-        }
-        other => {
-            warn!("Unsupported mic sample format: {other:?}");
-            return (Some(shared), None, name, error_flag, sample_counter, None);
-        }
-    };
-
-    let stream = match stream {
-        Ok(s) => s,
-        Err(e) => {
-            warn!("Failed to build mic stream: {e}");
-            return (Some(shared), None, name, error_flag, sample_counter, None);
-        }
-    };
-
-    if let Err(e) = stream.play() {
-        warn!("Failed to start mic stream: {e}");
-        return (Some(shared), None, name, error_flag, sample_counter, None);
+    if candidates.is_empty() {
+        return (None, None, "(no mic)".into(), Arc::clone(&error_flag), Arc::clone(&sample_counter), None);
     }
 
-    let detect_shutdown = Arc::clone(&shutdown);
-    let pitch_thread = std::thread::spawn(move || {
-        pitch_detection_loop(shared_detect, detect_shutdown);
-    });
+    use cpal::SampleFormat;
 
-    (Some(shared), Some(stream), name, error_flag, sample_counter, Some(pitch_thread))
+    for device in candidates {
+        let name = device_display_name(&device);
+
+        let default_cfg = match device.default_input_config() {
+            Ok(c) => c,
+            Err(e) => {
+                warn!("Skipping mic '{name}': {e}");
+                continue;
+            }
+        };
+
+        let sample_rate: u32 = default_cfg.sample_rate();
+        let channels: u16 = default_cfg.channels();
+        let sample_format = default_cfg.sample_format();
+        info!("Trying mic '{name}': {sample_rate}Hz, {channels}ch, format={sample_format:?}");
+
+        let config = cpal::StreamConfig {
+            channels,
+            sample_rate,
+            buffer_size: cpal::BufferSize::Default,
+        };
+
+        let shared = Arc::new(Mutex::new(MicPitchData::new(sample_rate)));
+        let shared_cb = Arc::clone(&shared);
+        let shared_detect = Arc::clone(&shared);
+
+        let counter_cb = Arc::clone(&sample_counter);
+
+        let push_samples: Arc<dyn Fn(&[f32]) + Send + Sync> = Arc::new(move |data: &[f32]| {
+            if let Ok(mut lock) = shared_cb.try_lock() {
+                let ch = channels as usize;
+                for chunk in data.chunks(ch) {
+                    let mono = chunk.iter().sum::<f32>() / ch as f32;
+                    lock.samples.push_back(mono);
+                }
+                while lock.samples.len() > PITCH_WINDOW * 2 {
+                    lock.samples.pop_front();
+                }
+            }
+            counter_cb.fetch_add(data.len() as u64, Ordering::Relaxed);
+        });
+
+        let err_flag_clone = Arc::clone(&error_flag);
+        let make_err_cb = move || {
+            let flag = Arc::clone(&err_flag_clone);
+            move |err: cpal::StreamError| {
+                if !flag.swap(true, Ordering::Relaxed) {
+                    error!("Microphone stream error: {err}");
+                }
+            }
+        };
+
+        let stream = match sample_format {
+            SampleFormat::F32 => {
+                let push = push_samples.clone();
+                device.build_input_stream(
+                    &config,
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| push(data),
+                    make_err_cb(),
+                    None,
+                )
+            }
+            SampleFormat::I16 => {
+                let push = push_samples.clone();
+                let mut float_buf: Vec<f32> = Vec::new();
+                device.build_input_stream(
+                    &config,
+                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                        float_buf.clear();
+                        float_buf.extend(data.iter().map(|&s| s as f32 / i16::MAX as f32));
+                        push(&float_buf);
+                    },
+                    make_err_cb(),
+                    None,
+                )
+            }
+            SampleFormat::I32 => {
+                let push = push_samples.clone();
+                let mut float_buf: Vec<f32> = Vec::new();
+                device.build_input_stream(
+                    &config,
+                    move |data: &[i32], _: &cpal::InputCallbackInfo| {
+                        float_buf.clear();
+                        float_buf.extend(data.iter().map(|&s| s as f32 / i32::MAX as f32));
+                        push(&float_buf);
+                    },
+                    make_err_cb(),
+                    None,
+                )
+            }
+            other => {
+                warn!("Skipping mic '{name}': unsupported format {other:?}");
+                continue;
+            }
+        };
+
+        let stream = match stream {
+            Ok(s) => s,
+            Err(e) => {
+                warn!("Skipping mic '{name}': failed to build stream: {e}");
+                continue;
+            }
+        };
+
+        if let Err(e) = stream.play() {
+            warn!("Skipping mic '{name}': failed to play: {e}");
+            continue;
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if error_flag.load(Ordering::Relaxed) {
+            warn!("Skipping mic '{name}': stream errored immediately after start");
+            error_flag.store(false, Ordering::Relaxed);
+            drop(stream);
+            continue;
+        }
+
+        info!("Microphone: {name}");
+        let detect_shutdown = Arc::clone(&shutdown);
+        let pitch_thread = std::thread::spawn(move || {
+            pitch_detection_loop(shared_detect, detect_shutdown);
+        });
+
+        return (Some(shared), Some(stream), name, error_flag, sample_counter, Some(pitch_thread));
+    }
+
+    warn!("No working microphone found");
+    (None, None, "(no mic)".into(), error_flag, sample_counter, None)
 }
 
 fn pitch_detection_loop(
@@ -388,7 +432,7 @@ pub struct MicLoadTask {
 pub fn spawn_mic_load(commands: &mut Commands, preferred: Option<String>) {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let capture = start_microphone(preferred.as_deref());
+        let capture = start_microphone(preferred.as_deref(), true);
         let _ = tx.send(capture);
     });
     commands.insert_resource(MicLoadTask { rx: Mutex::new(rx) });

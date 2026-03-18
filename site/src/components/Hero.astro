@@ -12,10 +12,7 @@ const platforms = [
   },
   {
     os: "macos", label: "macOS",
-    archs: [
-      { label: "Apple Silicon", file: "nightingale-aarch64-apple-darwin.tar.gz" },
-      { label: "Intel", file: "nightingale-x86_64-apple-darwin.tar.gz" },
-    ],
+    href: "/docs/getting-started.html",
   },
   {
     os: "windows", label: "Windows",
@@ -41,34 +38,51 @@ const platforms = [
         <div class="hero-downloads">
           {platforms.map((p) => (
             <div class="download-group" data-os={p.os}>
-              <a
-                href={`${base}/${p.archs[0].file}`}
-                class="btn-download"
-                data-os={p.os}
-                data-has-archs={p.archs.length > 1 ? "true" : undefined}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="7 10 12 15 17 10" />
-                  <line x1="12" y1="15" x2="12" y2="3" />
-                </svg>
-                {p.label}
-              </a>
-              {p.archs.length > 1 && (
-                <div class="arch-dropdown">
-                  {p.archs.map((a) => (
-                    <a
-                      href={`${base}/${a.file}`}
-                      class="arch-option"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      {a.label}
-                    </a>
-                  ))}
-                </div>
+              {"href" in p ? (
+                <a
+                  href={p.href}
+                  class="btn-download"
+                  data-os={p.os}
+                >
+                  <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  {p.label}
+                </a>
+              ) : (
+                <>
+                  <a
+                    href={`${base}/${p.archs[0].file}`}
+                    class="btn-download"
+                    data-os={p.os}
+                    data-has-archs={p.archs.length > 1 ? "true" : undefined}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    {p.label}
+                  </a>
+                  {p.archs.length > 1 && (
+                    <div class="arch-dropdown">
+                      {p.archs.map((a) => (
+                        <a
+                          href={`${base}/${a.file}`}
+                          class="arch-option"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {a.label}
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           ))}
@@ -132,10 +146,6 @@ const platforms = [
       if (isDetected) {
         btn.classList.add("detected");
 
-        if (btnOS === "macos" && !arm) {
-          const options = dropdown?.querySelectorAll<HTMLAnchorElement>(".arch-option");
-          if (options && options.length > 1) btn.href = options[1].href;
-        }
         if (btnOS === "linux" && arm) {
           const options = dropdown?.querySelectorAll<HTMLAnchorElement>(".arch-option");
           if (options && options.length > 1) btn.href = options[1].href;

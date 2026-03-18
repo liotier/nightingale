@@ -36,7 +36,17 @@ Ships as a single binary. No manual installation of Python, ffmpeg, or ML models
 
 Download the latest release for your platform from the [Releases](../../releases) page and run it. On first launch, Nightingale will set up its Python environment and download ML models — this takes a few minutes and shows a progress screen.
 
-Supported audio formats: `.mp3`, `.flac`, `.ogg`, `.wav`, `.m4a`, `.aac`, `.wma`. Video formats: `.mp4`, `.mkv`, `.avi`, `.webm`, `.mov`, `.m4v`.
+### macOS
+
+macOS quarantines files downloaded from the internet. Since Nightingale isn't signed with an Apple Developer ID, Gatekeeper will block it with a message like *"app is damaged and can't be opened"*. To fix this, remove the quarantine attribute after extracting:
+
+```bash
+xattr -cr Nightingale.app
+```
+
+### Supported formats
+
+Audio: `.mp3`, `.flac`, `.ogg`, `.wav`, `.m4a`, `.aac`, `.wma`. Video: `.mp4`, `.mkv`, `.avi`, `.webm`, `.mov`, `.m4v`.
 
 ## Controls
 

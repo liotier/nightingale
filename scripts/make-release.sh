@@ -20,19 +20,16 @@ case "$OS" in
       2) TARGET="aarch64-unknown-linux-gnu" ;;
       *) echo "Invalid choice"; exit 1 ;;
     esac
-    if [ "$TARGET" = "aarch64-unknown-linux-gnu" ] && [ "$ARCH" != "aarch64" ]; then
-      if ! command -v cross &>/dev/null; then
-        echo ""
-        echo "Error: 'cross' is required for aarch64 cross-compilation."
-        echo ""
-        echo "  cargo install cross"
-        echo ""
-        echo "Docker must be running."
-        exit 1
-      fi
-      USE_CROSS=true
-      echo "==> Cross-compiling for aarch64 (using cross)"
+    if ! command -v cross &>/dev/null; then
+      echo ""
+      echo "Error: 'cross' is required for Linux release builds (ensures glibc compatibility)."
+      echo ""
+      echo "  cargo install cross"
+      echo ""
+      echo "Docker must be running."
+      exit 1
     fi
+    USE_CROSS=true
     ;;
   Darwin)
     echo "Build for which architecture?"

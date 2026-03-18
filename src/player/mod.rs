@@ -828,25 +828,30 @@ fn handle_mic_toggle(
         if devices.len() <= 1 {
             return;
         }
-        let current_idx = devices.iter().position(|n| *n == mic.device_name);
-        let next_idx = match current_idx {
-            Some(i) => (i + 1) % devices.len(),
-            None => 0,
-        };
-        let next_name = &devices[next_idx];
-        info!("Switching mic to: {next_name}");
-
+        let current_idx = devices.iter().position(|n| *n == mic.device_name).unwrap_or(0);
         let was_active = mic.active;
-        let mut new_capture = microphone::start_microphone(Some(next_name));
-        new_capture.active = was_active && new_capture.active;
-        let device_name = new_capture.device_name.clone();
-        commands.insert_resource(new_capture);
 
-        config.preferred_mic = Some(device_name.clone());
-        config.save();
+        for offset in 1..=devices.len() {
+            let try_idx = (current_idx + offset) % devices.len();
+            let try_name = &devices[try_idx];
+            info!("Switching mic to: {try_name}");
 
-        if let Ok(mut text) = mic_text_query.single_mut() {
-            **text = format_mic_text(was_active, &device_name);
+            let new_capture = microphone::start_microphone(Some(try_name), false);
+            if new_capture.has_stream() {
+                let mut new_capture = new_capture;
+                new_capture.active = was_active;
+                let device_name = new_capture.device_name.clone();
+                commands.insert_resource(new_capture);
+
+                config.preferred_mic = Some(device_name.clone());
+                config.save();
+
+                if let Ok(mut text) = mic_text_query.single_mut() {
+                    **text = format_mic_text(was_active, &device_name);
+                }
+                return;
+            }
+            warn!("Mic '{try_name}' failed, trying next...");
         }
     }
 }
@@ -871,7 +876,7 @@ fn check_mic_health(
         mic.device_name
     );
 
-    let mut new_capture = microphone::start_microphone(config.preferred_mic.as_deref());
+    let mut new_capture = microphone::start_microphone(config.preferred_mic.as_deref(), true);
     if !new_capture.has_stream() {
         new_capture.active = false;
         new_capture.device_name = "(disconnected)".into();

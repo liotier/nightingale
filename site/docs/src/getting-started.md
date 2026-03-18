@@ -1,12 +1,32 @@
 # Getting Started
 
-## Installation
+## Download
 
-Download the latest release for your platform from the [Releases](https://github.com/rzru/nightingale/releases) page and run the binary.
+| Platform | Architecture | Link |
+|---|---|---|
+| Linux | x86_64 | [nightingale-x86_64-unknown-linux-gnu.tar.gz](https://github.com/rzru/nightingale/releases/latest/download/nightingale-x86_64-unknown-linux-gnu.tar.gz) |
+| Linux | ARM (aarch64) | [nightingale-aarch64-unknown-linux-gnu.tar.gz](https://github.com/rzru/nightingale/releases/latest/download/nightingale-aarch64-unknown-linux-gnu.tar.gz) |
+| macOS | Apple Silicon | [nightingale-aarch64-apple-darwin.tar.gz](https://github.com/rzru/nightingale/releases/latest/download/nightingale-aarch64-apple-darwin.tar.gz) |
+| macOS | Intel | [nightingale-x86_64-apple-darwin.tar.gz](https://github.com/rzru/nightingale/releases/latest/download/nightingale-x86_64-apple-darwin.tar.gz) |
+| Windows | x86_64 | [nightingale-x86_64-pc-windows-msvc.zip](https://github.com/rzru/nightingale/releases/latest/download/nightingale-x86_64-pc-windows-msvc.zip) |
+
+All releases are also available on the [Releases](https://github.com/rzru/nightingale/releases) page.
 
 Supported audio formats: `.mp3`, `.flac`, `.ogg`, `.wav`, `.m4a`, `.aac`, `.wma`.
 
 Supported video formats: `.mp4`, `.mkv`, `.avi`, `.webm`, `.mov`, `.m4v`.
+
+## macOS: Removing the Quarantine Flag
+
+macOS automatically adds a quarantine attribute to files downloaded from the internet. Since Nightingale is not signed with an Apple Developer ID, Gatekeeper will block it with a message like *"app is damaged and can't be opened"* or *"Apple cannot check it for malicious software"*.
+
+To fix this, remove the quarantine attribute after extracting the archive:
+
+```bash
+xattr -cr Nightingale.app
+```
+
+This tells macOS to clear (`-c`) all extended attributes recursively (`-r`) from the app bundle, which removes the `com.apple.quarantine` flag that triggers Gatekeeper. The app itself is safe — it's just not code-signed.
 
 ## First Launch
 
