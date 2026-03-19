@@ -90,12 +90,13 @@ if [ "$SKIP_ANALYZER" = false ]; then
 fi
 
 # ── Rust toolchain ───────────────────────────────────────────────────
+export RUSTUP_INIT_SKIP_PATH_CHECK=yes
 if ! command -v rustup &>/dev/null; then
     info "Installing Rust toolchain..."
     # Run rustup as the invoking user if possible, else as root.
     SUDO_USER="${SUDO_USER:-root}"
     if [ "$SUDO_USER" != "root" ]; then
-        su - "$SUDO_USER" -c 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable'
+        su - "$SUDO_USER" -c "export RUSTUP_INIT_SKIP_PATH_CHECK=yes; curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable"
     else
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
     fi
