@@ -3,4 +3,5 @@ whisperx>=3.3.0
 torch>=2.0.0
 torchaudio>=2.0.0
 audio-separator>=0.25
+librosa>=0.10.0
 scipy>=1.11.0
