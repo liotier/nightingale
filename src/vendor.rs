@@ -479,10 +479,29 @@ fn detect_gpu() -> &'static str {
             .is_ok_and(|s| s.success())
         {
             "cuda"
+        } else if rocm_available() {
+            "rocm"
         } else {
             "cpu"
         }
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn rocm_available() -> bool {
+    // Check for rocminfo on PATH or at the standard ROCm install location
+    for cmd in &["rocminfo", "/opt/rocm/bin/rocminfo"] {
+        let ok = silent_command(cmd)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        if ok {
+            eprintln!("[vendor] ROCm detected via {cmd}");
+            return true;
+        }
+    }
+    false
 }
 
 fn step_install_packages(tx: &mpsc::Sender<BootstrapProgress>) -> Result<(), String> {
@@ -502,6 +521,7 @@ fn step_install_packages(tx: &mpsc::Sender<BootstrapProgress>) -> Result<(), Str
 
     let index_url = match gpu {
         "cuda" => Some("https://download.pytorch.org/whl/cu121"),
+        "rocm" => Some("https://download.pytorch.org/whl/rocm6.3"),
         "cpu" => Some("https://download.pytorch.org/whl/cpu"),
         _ => None,
     };
@@ -519,10 +539,9 @@ fn step_install_packages(tx: &mpsc::Sender<BootstrapProgress>) -> Result<(), Str
         return Err(format!("PyTorch install failed: {stderr}"));
     }
 
-    let audio_sep_pkg = if gpu == "cuda" {
-        "audio-separator[gpu]>=0.25"
-    } else {
-        "audio-separator>=0.25"
+    let audio_sep_pkg = match gpu {
+        "cuda" | "rocm" => "audio-separator[gpu]>=0.25",
+        _ => "audio-separator>=0.25",
     };
     send(tx, "Packages", "Installing Demucs, WhisperX and audio-separator...");
 
