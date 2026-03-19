@@ -10,6 +10,7 @@ const AUDIO_PY: &str = include_str!("../analyzer/audio.py");
 const HALLUCINATION_PY: &str = include_str!("../analyzer/hallucination.py");
 const LANGUAGE_PY: &str = include_str!("../analyzer/language.py");
 const WHISPER_COMPAT_PY: &str = include_str!("../analyzer/whisper_compat.py");
+const KEY_DETECTION_PY: &str = include_str!("../analyzer/key_detection.py");
 const REQUIREMENTS_TXT: &str = include_str!("../analyzer/requirements.txt");
 
 const FILES: &[(&str, &str)] = &[
@@ -23,6 +24,7 @@ const FILES: &[(&str, &str)] = &[
     ("hallucination.py", HALLUCINATION_PY),
     ("language.py", LANGUAGE_PY),
     ("whisper_compat.py", WHISPER_COMPAT_PY),
+    ("key_detection.py", KEY_DETECTION_PY),
     ("requirements.txt", REQUIREMENTS_TXT),
 ];
 
