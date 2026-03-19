@@ -10,6 +10,8 @@ pub struct Transcript {
     pub segments: Vec<Segment>,
     #[serde(default = "default_source")]
     pub source: String,
+    #[serde(default)]
+    pub key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

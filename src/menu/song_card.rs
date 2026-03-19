@@ -64,6 +64,7 @@ const FA_STAR_HALF: &str = "\u{f5c0}";
 const FA_GLOBE: &str = "\u{f0ac}";
 const FA_TRASH: &str = "\u{f1f8}";
 const FA_FILM: &str = "\u{f008}";
+const FA_MUSIC: &str = "\u{f001}";
 
 pub const LANGUAGES: &[(&str, &str)] = &[
     ("en", "English"),
@@ -326,6 +327,69 @@ fn spawn_album_art(
     });
 }
 
+fn spawn_key_badge(
+    parent: &mut ChildSpawnerCommands,
+    key: &str,
+    theme: &UiTheme,
+    icon_font: &IconFont,
+) {
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(0.0),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|wrapper| {
+            wrapper.spawn((
+                Text::new(" · "),
+                TextFont {
+                    font_size: 13.0,
+                    ..default()
+                },
+                TextColor(theme.text_dim),
+            ));
+            wrapper
+                .spawn((
+                    Node {
+                        padding: UiRect::new(
+                            Val::Px(5.0),
+                            Val::Px(5.0),
+                            Val::Px(1.0),
+                            Val::Px(1.0),
+                        ),
+                        border_radius: BorderRadius::all(Val::Px(3.0)),
+                        border: UiRect::all(Val::Px(1.0)),
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(3.0),
+                        ..default()
+                    },
+                    BorderColor::all(theme.accent.with_alpha(0.4)),
+                    BackgroundColor(theme.accent.with_alpha(0.1)),
+                ))
+                .with_children(|badge| {
+                    badge.spawn((
+                        Text::new(FA_MUSIC),
+                        TextFont {
+                            font: icon_font.0.clone(),
+                            font_size: 11.0,
+                            ..default()
+                        },
+                        TextColor(theme.accent),
+                    ));
+                    badge.spawn((
+                        Text::new(key),
+                        TextFont {
+                            font_size: 12.0,
+                            ..default()
+                        },
+                        TextColor(theme.accent),
+                    ));
+                });
+        });
+}
+
 fn spawn_song_info(
     card: &mut ChildSpawnerCommands,
     song: &Song,
@@ -404,6 +468,11 @@ fn spawn_song_info(
                     ..default()
                 },
             ));
+
+            // Display detected musical key badge.
+            if let Some(ref key) = song.detected_key {
+                spawn_key_badge(sub_row, key, theme, icon_font);
+            }
 
             let lang_display = song
                 .language

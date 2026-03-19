@@ -22,6 +22,7 @@ pub struct Song {
     pub analysis_status: AnalysisStatus,
     pub language: Option<String>,
     pub is_video: bool,
+    pub detected_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +64,7 @@ impl Song {
             analysis_status,
             language,
             is_video,
+            detected_key: None,
         }
     }
 

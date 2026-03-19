@@ -534,6 +534,7 @@ fn poll_active_job(
                 } else {
                     Some(t.language)
                 };
+                library.songs[song_index].detected_key = t.key;
             }
             _ => {
                 library.songs[song_index].analysis_status =

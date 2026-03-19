@@ -9,6 +9,7 @@ from whisper_compat import progress
 from stems import separate_stems, separate_stems_uvr
 from transcribe import transcribe_vocals
 from align import align_lyrics
+from key_detection import detect_key
 
 
 def ffmpeg_bin():
@@ -109,6 +110,14 @@ def run_pipeline(
         free_gpu_fn=free_gpu_fn,
     )
 
+    # Detect musical key from the vocal stem.
+    progress(52, "Detecting musical key...")
+    try:
+        detected_key = detect_key(vocals_path)
+    except Exception as e:
+        print(f"[nightingale:LOG] Key detection failed: {e}", flush=True)
+        detected_key = None
+
     if callable(whisper_model):
         whisper_model = whisper_model()
 
@@ -122,6 +131,9 @@ def run_pipeline(
         whisper_model=whisper_model,
         pre_align_cleanup=pre_align_cleanup,
     )
+
+    if detected_key:
+        transcript["key"] = detected_key
 
     progress(95, "Writing transcript...")
     with open(transcript_path, "w", encoding="utf-8") as f:
