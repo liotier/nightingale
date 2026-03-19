@@ -480,21 +480,24 @@ fn detect_gpu() -> GpuInfo {
 
     #[cfg(not(target_os = "macos"))]
     {
-        match nvidia_smi_path() {
-            Some(smi) => {
-                let cuda_index = query_cuda_index(&smi);
-                eprintln!("[vendor] GPU detection: CUDA (index {cuda_index})");
-                GpuInfo {
-                    device: "cuda",
-                    torch_index: cuda_index,
-                }
+        if let Some(smi) = nvidia_smi_path() {
+            let cuda_index = query_cuda_index(&smi);
+            eprintln!("[vendor] GPU detection: CUDA (index {cuda_index})");
+            GpuInfo {
+                device: "cuda",
+                torch_index: cuda_index,
             }
-            None => {
-                eprintln!("[vendor] GPU detection: CPU (nvidia-smi not found)");
-                GpuInfo {
-                    device: "cpu",
-                    torch_index: "https://download.pytorch.org/whl/cpu",
-                }
+        } else if rocm_available() {
+            eprintln!("[vendor] GPU detection: ROCm");
+            GpuInfo {
+                device: "rocm",
+                torch_index: "https://download.pytorch.org/whl/rocm6.3",
+            }
+        } else {
+            eprintln!("[vendor] GPU detection: CPU (no CUDA or ROCm found)");
+            GpuInfo {
+                device: "cpu",
+                torch_index: "https://download.pytorch.org/whl/cpu",
             }
         }
     }
@@ -515,6 +518,24 @@ fn nvidia_smi_path() -> Option<&'static str> {
         eprintln!("[vendor] nvidia-smi not found on PATH");
         None
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn rocm_available() -> bool {
+    // Check for rocminfo on PATH or at the standard ROCm install location
+    for cmd in &["rocminfo", "/opt/rocm/bin/rocminfo"] {
+        let ok = silent_command(cmd)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        if ok {
+            eprintln!("[vendor] ROCm detected via {cmd}");
+            return true;
+        }
+    }
+    eprintln!("[vendor] ROCm not found (rocminfo not available)");
+    false
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -555,10 +576,9 @@ fn step_install_packages(tx: &mpsc::Sender<BootstrapProgress>) -> Result<(), Str
     let py_str = py.to_string_lossy().to_string();
     let index = gpu.torch_index;
 
-    let audio_sep_pkg = if gpu.device == "cuda" {
-        "audio-separator[gpu]>=0.25"
-    } else {
-        "audio-separator>=0.25"
+    let audio_sep_pkg = match gpu.device {
+        "cuda" | "rocm" => "audio-separator[gpu]>=0.25",
+        _ => "audio-separator>=0.25",
     };
 
     let cython_out = silent_command(&uv)
@@ -591,8 +611,9 @@ fn step_install_packages(tx: &mpsc::Sender<BootstrapProgress>) -> Result<(), Str
         return Err(format!("Package install failed: {stderr}"));
     }
 
-    if gpu.device == "cuda" {
-        send(tx, "Packages", format!("Installing CUDA PyTorch..."));
+    if gpu.device == "cuda" || gpu.device == "rocm" {
+        let label = if gpu.device == "cuda" { "CUDA" } else { "ROCm" };
+        send(tx, "Packages", format!("Installing {label} PyTorch..."));
 
         let torch_args: Vec<&str> = vec![
             "pip", "install",
@@ -607,11 +628,11 @@ fn step_install_packages(tx: &mpsc::Sender<BootstrapProgress>) -> Result<(), Str
         let output = silent_command(&uv)
             .args(&torch_args)
             .output()
-            .map_err(|e| format!("Failed to install CUDA PyTorch: {e}"))?;
+            .map_err(|e| format!("Failed to install {label} PyTorch: {e}"))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("CUDA PyTorch install failed: {stderr}"));
+            return Err(format!("{label} PyTorch install failed: {stderr}"));
         }
     }
 
